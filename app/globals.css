@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-ink text-zinc-100 antialiased;
+}
+.btn {
+  @apply px-4 py-2 rounded-lg font-semibold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed;
+}
+.btn-amber { @apply bg-amber text-ink hover:brightness-110; }
+.btn-ghost { @apply border border-line hover:border-zinc-500; }
+.card { @apply bg-panel border border-line rounded-xl p-4; }
+.tag { @apply text-[11px] uppercase tracking-wider text-mute font-mono; }
