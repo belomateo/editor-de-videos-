@@ -120,7 +120,14 @@ function buildZoomExpr(zooms: Zoom[]): string {
 export async function renderVideo(opts: RenderOpts) {
   const { input, output, assFile, width, height, segments, zooms = [] } = opts;
   const scaleCrop = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
-  const subs = `subtitles=${assFile.replace(/([:'])/g, '\\$1')}`;
+  // Escapar la ruta del .ass para el filtro de subtítulos.
+  // En Windows hay que convertir los backslashes a forward slashes (ffmpeg los acepta)
+  // y escapar los dos puntos de la letra de unidad (C:) para que no se confundan con el separador de opciones.
+  const escapedAss = assFile
+    .replace(/\\/g, '/')      // C:\foo\bar.ass -> C:/foo/bar.ass
+    .replace(/:/g, '\\:')      // C:/foo -> C\:/foo
+    .replace(/'/g, "\\'");
+  const subs = `subtitles='${escapedAss}'`;
 
   // Filtro de zoom: usamos scale dinámico + crop centrado.
   // El truco: escalamos el frame por el factor de zoom y recortamos al centro.
