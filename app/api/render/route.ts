@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     highlightColor = '#FFC857',
     selectedCuts,
     clip, // { start, end, titulo } — si viene, renderiza solo ese tramo (modo Clips)
+    renderAllClips = false, // si true, renderiza todos los clips detectados
   } = await req.json();
   const project = getProject(id);
   if (!project?.words?.length) {
@@ -32,6 +33,39 @@ export async function POST(req: NextRequest) {
   try {
     fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
     fs.mkdirSync(TMP_DIR, { recursive: true });
+
+    // Render de todos los clips de una
+    if (renderAllClips) {
+      if (!project.clips?.length) {
+        return NextResponse.json({ error: 'No hay clips detectados. Usá "Detectar clips" primero.' }, { status: 400 });
+      }
+      project.renders = project.renders || [];
+      for (const cl of project.clips) {
+        const segments: Array<[number, number]> = [[Math.max(0, cl.start), Math.min(project.duration || cl.end, cl.end)]];
+        const words = remapWords(project.words, segments);
+        const renderId = nanoid(6);
+        const assPath = path.join(TMP_DIR, `${id}-clip-${renderId}.ass`);
+        fs.writeFileSync(assPath, buildKaraokeAss(words, { ...preset, highlightColor }));
+        const outFile = path.join(OUTPUTS_DIR, `${id}-clip-${renderId}.mp4`);
+        await renderVideo({
+          input: project.sourceFile,
+          output: outFile,
+          assFile: assPath,
+          ...preset,
+          segments,
+        });
+        project.renders.unshift({
+          id: renderId,
+          platform: 'vertical',
+          file: outFile,
+          label: `Clip: ${cl.titulo}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      project.status = 'renderizado';
+      saveProject(project);
+      return NextResponse.json(project);
+    }
 
     let segments: Array<[number, number]>;
     if (clip) {
