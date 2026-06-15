@@ -1,4 +1,4 @@
-import { Word, Analysis, Clip } from './store';
+import { Word, Analysis, Clip, Cut, Zoom } from './store';
 
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 
@@ -196,4 +196,118 @@ export async function findClips(
   return allClips
     .sort((a, b) => a.start - b.start)
     .slice(0, 8);
+}
+
+// ─── FASE 3: edición conversacional ───
+
+export type EditAction =
+  | { tipo: 'agregar_corte'; start: number; end: number; razon: string }
+  | { tipo: 'quitar_corte'; index: number }
+  | { tipo: 'ajustar_corte'; index: number; start: number; end: number }
+  | { tipo: 'agregar_zoom'; start: number; end: number; scale: number; razon: string }
+  | { tipo: 'quitar_zoom'; index: number }
+  | { tipo: 'set_color'; color: string }
+  | { tipo: 'set_encuadre'; framing: 'auto' | 'left' | 'center' | 'right' }
+  | { tipo: 'set_formato'; platform: 'vertical' | 'horizontal' };
+
+export type ChatEditResult = {
+  respuesta: string; // mensaje en lenguaje natural para el usuario
+  acciones: EditAction[];
+};
+
+type EditContext = {
+  duration: number;
+  cortes: Cut[];
+  zooms: Zoom[];
+  color: string;
+  framing: string;
+  platform: string;
+  words: Word[];
+};
+
+export async function editWithChat(
+  instruccion: string,
+  ctx: EditContext,
+  historial: Array<{ role: 'user' | 'assistant'; content: string }> = []
+): Promise<ChatEditResult> {
+  // Damos a la IA una transcripción liviana con timestamps para que pueda ubicar momentos
+  const timed = buildTimedTranscript(ctx.words).slice(0, 30000);
+
+  const cortesStr = ctx.cortes.map((c, i) => `  [${i}] ${c.start.toFixed(1)}s-${c.end.toFixed(1)}s: ${c.razon}`).join('\n') || '  (ninguno)';
+  const zoomsStr = ctx.zooms.map((z, i) => `  [${i}] ${z.start.toFixed(1)}s-${z.end.toFixed(1)}s x${z.scale}: ${z.razon}`).join('\n') || '  (ninguno)';
+
+  const system = `Sos el asistente de edición de ZW Clipper. El usuario te habla en español argentino (voseo) y te pide cambios sobre la edición de su video. Tu trabajo es interpretar el pedido y devolver acciones estructuradas que la app aplica automáticamente.
+
+Respondé ÚNICAMENTE con JSON válido, sin markdown ni backticks, con esta forma:
+{"respuesta":"mensaje corto y directo al usuario explicando qué hiciste","acciones":[...]}
+
+Tipos de acciones disponibles:
+- {"tipo":"agregar_corte","start":12.3,"end":14.1,"razon":"..."} — elimina ese tramo
+- {"tipo":"quitar_corte","index":2} — reactiva/elimina el corte número 2 de la lista
+- {"tipo":"ajustar_corte","index":1,"start":10.0,"end":12.5} — cambia los tiempos del corte 1
+- {"tipo":"agregar_zoom","start":30.0,"end":34.0,"scale":1.3,"razon":"..."} — zoom en ese tramo
+- {"tipo":"quitar_zoom","index":0} — saca el zoom número 0
+- {"tipo":"set_color","color":"#FF0000"} — color de resaltado de subtítulos
+- {"tipo":"set_encuadre","framing":"auto"} — auto, left, center o right
+- {"tipo":"set_formato","platform":"vertical"} — vertical (9:16) u horizontal (16:9)
+
+Reglas:
+- Usá los timestamps reales de la transcripción para ubicar momentos. Si el usuario dice "el minuto 3", son 180 segundos.
+- Si el pedido es ambiguo o no podés ubicarlo, devolvé acciones vacías y pedí aclaración en "respuesta".
+- Si el usuario solo pregunta algo (no pide un cambio), respondé en "respuesta" con acciones vacías.
+- scale de zoom entre 1.2 y 1.5. Colores en hex.
+- Sé conciso y directo en "respuesta", como un editor compañero de laburo.`;
+
+  const user = `Estado actual de la edición:
+- Duración del video: ${ctx.duration.toFixed(1)}s (${(ctx.duration/60).toFixed(1)} min)
+- Formato: ${ctx.platform}
+- Encuadre: ${ctx.framing}
+- Color resaltado: ${ctx.color}
+
+Cortes actuales:
+${cortesStr}
+
+Zooms actuales:
+${zoomsStr}
+
+Transcripción con timestamps (para ubicar momentos):
+${timed}
+
+Pedido del usuario: "${instruccion}"`;
+
+  const messages = [
+    ...historial.map((h) => ({ role: h.role, content: h.content })),
+    { role: 'user' as const, content: user },
+  ];
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2000,
+      system,
+      messages,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Error de Claude API: ${res.status} ${await res.text()}`);
+
+  const data = await res.json();
+  const text = data.content
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => b.text)
+    .join('\n')
+    .replace(/```json|```/g, '')
+    .trim();
+
+  const parsed = safeParseJSON(text);
+  return {
+    respuesta: parsed.respuesta || 'Listo.',
+    acciones: Array.isArray(parsed.acciones) ? parsed.acciones : [],
+  };
 }

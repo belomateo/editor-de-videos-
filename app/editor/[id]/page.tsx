@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Timeline, { Cut } from '../../components/Timeline';
 import PreviewPlayer, { PreviewHandle } from '../../components/PreviewPlayer';
+import EditChat, { EditAction } from '../../components/EditChat';
 
 type Clip = { start: number; end: number; titulo: string; hook: string; razon: string };
 type Zoom = { start: number; end: number; scale: number; razon: string };
@@ -79,6 +80,52 @@ export default function Editor() {
     }
   }
 
+  // Aplica las acciones que devuelve el chat de IA sobre el estado local
+  function applyActions(actions: EditAction[]) {
+    const dur = p?.duration ?? 0;
+    const clamp = (t: number) => Math.max(0, Math.min(dur, t));
+    for (const a of actions) {
+      switch (a.tipo) {
+        case 'agregar_corte': {
+          const s = clamp(a.start), e = clamp(a.end);
+          if (e <= s) break; // ignorar cortes inválidos
+          setCuts((prev) => [...prev, { start: s, end: e, razon: a.razon || 'corte manual' }]);
+          setEnabledCuts((prev) => [...prev, true]);
+          break;
+        }
+        case 'quitar_corte':
+          setEnabledCuts((prev) => prev.map((v, i) => (i === a.index ? false : v)));
+          break;
+        case 'ajustar_corte': {
+          const s = clamp(a.start), e = clamp(a.end);
+          if (e <= s) break;
+          setCuts((prev) => prev.map((c, i) => (i === a.index ? { ...c, start: s, end: e } : c)));
+          break;
+        }
+        case 'agregar_zoom': {
+          const s = clamp(a.start), e = clamp(a.end);
+          if (e <= s) break;
+          const scale = Math.max(1.1, Math.min(2, a.scale || 1.3));
+          setZooms((prev) => [...prev, { start: s, end: e, scale, razon: a.razon || 'zoom manual' }]);
+          setEnabledZooms((prev) => [...prev, true]);
+          break;
+        }
+        case 'quitar_zoom':
+          setEnabledZooms((prev) => prev.map((v, i) => (i === a.index ? false : v)));
+          break;
+        case 'set_color':
+          if (/^#[0-9A-Fa-f]{6}$/.test(a.color)) setColor(a.color);
+          break;
+        case 'set_encuadre':
+          if (['auto', 'left', 'center', 'right'].includes(a.framing)) setFraming(a.framing);
+          break;
+        case 'set_formato':
+          if (['vertical', 'horizontal'].includes(a.platform)) setPlatform(a.platform);
+          break;
+      }
+    }
+  }
+
   if (!p) return <p className="text-mute">Cargando…</p>;
 
   const selectedCuts = cuts.filter((_, i) => enabledCuts[i]);
@@ -152,6 +199,15 @@ export default function Editor() {
             }}
           />
         </section>
+      )}
+
+      {/* Chat de edición con IA — solo si ya analizó */}
+      {p.analysis && p.duration && (
+        <EditChat
+          projectId={id}
+          estado={{ cortes: cuts, zooms, color, framing, platform }}
+          onApplyActions={applyActions}
+        />
       )}
 
       <section className="card">
