@@ -1,8 +1,14 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { Cut, Word } from './store';
 
 const exec = promisify(execFile);
+
+// Directorio temporal para los archivos de estadísticas de detección de foco
+const TMP_DIR_FOR_STATS = os.tmpdir();
 
 export async function getDuration(file: string): Promise<number> {
   const { stdout } = await exec('ffprobe', [
@@ -14,7 +20,19 @@ export async function getDuration(file: string): Promise<number> {
   return parseFloat(stdout.trim());
 }
 
-// Extrae el audio comprimido para mandarlo a Whisper (límite 25MB)
+// Devuelve el ancho y alto del video original
+export async function getDimensions(file: string): Promise<{ width: number; height: number }> {
+  const { stdout } = await exec('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height',
+    '-of', 'csv=p=0',
+    file,
+  ]);
+  const [w, h] = stdout.trim().split(',').map((n) => parseInt(n, 10));
+  return { width: w || 1920, height: h || 1080 };
+}
+
 export async function extractAudio(input: string, output: string) {
   await exec('ffmpeg', [
     '-y', '-i', input,
@@ -60,7 +78,55 @@ export function remapWords(words: Word[], segments: Array<[number, number]>): Wo
 
 type Zoom = { start: number; end: number; scale: number };
 
-// Re-mapea un intervalo de tiempo (zoom) a la línea de tiempo post-corte.
+// Detecta el centro horizontal de interés (dónde está la persona/acción) en un tramo del video.
+// Analiza el detalle visual (rango de luminancia + saturación) por franjas verticales.
+// Devuelve una fracción 0-1: 0 = foco a la izquierda, 0.5 = centro, 1 = derecha.
+export async function detectFocusFraction(
+  input: string,
+  start: number,
+  end: number,
+  srcW: number,
+  srcH: number
+): Promise<number> {
+  const bands = 5;
+  const bw = Math.floor(srcW / bands);
+  const dur = Math.max(0.1, end - start);
+  const times = [start + dur * 0.3, start + dur * 0.5, start + dur * 0.7];
+  const scores = new Array(bands).fill(0);
+
+  for (const t of times) {
+    for (let b = 0; b < bands; b++) {
+      const statsFile = path.join(TMP_DIR_FOR_STATS, `fstats-${Date.now()}-${b}-${Math.random().toString(36).slice(2, 6)}.txt`);
+      try {
+        await exec('ffmpeg', [
+          '-y', '-ss', String(t), '-i', input,
+          '-vf', `crop=${bw}:${srcH}:${b * bw}:0,signalstats,metadata=print:file=${statsFile.replace(/\\/g, '/')}`,
+          '-frames:v', '1', '-f', 'null', '-',
+        ], { maxBuffer: 1024 * 1024 * 16 });
+        const txt = fs.readFileSync(statsFile, 'utf8');
+        const get = (k: string) => {
+          const m = txt.match(new RegExp(k + '=([\\d.]+)'));
+          return m ? parseFloat(m[1]) : 0;
+        };
+        const range = get('YHIGH') - get('YLOW');
+        const sat = get('SATAVG');
+        scores[b] += range + sat * 0.5;
+        fs.unlinkSync(statsFile);
+      } catch {
+        // si falla, ignoramos esa muestra
+      }
+    }
+  }
+
+  const total = scores.reduce((a, b) => a + b, 0);
+  if (total === 0) return 0.5; // sin datos, centramos
+  // Centro de masa ponderado de las bandas → fracción 0-1
+  let weighted = 0;
+  scores.forEach((s, b) => { weighted += s * (b + 0.5) / bands; });
+  return Math.max(0, Math.min(1, weighted / total));
+}
+
+
 // Devuelve null si el intervalo cae enteramente dentro de un corte.
 export function remapInterval(
   start: number,
@@ -89,6 +155,7 @@ type RenderOpts = {
   height: number;
   segments: Array<[number, number]>; // segmentos a conservar
   zooms?: Zoom[]; // zooms en la línea de tiempo POST-corte
+  cropXExpr?: string; // expresión de offset X para el crop (encuadre inteligente). Default: centrado
 };
 
 // Genera la expresión de escala dinámica para los zooms.
@@ -118,8 +185,10 @@ function buildZoomExpr(zooms: Zoom[]): string {
 }
 
 export async function renderVideo(opts: RenderOpts) {
-  const { input, output, assFile, width, height, segments, zooms = [] } = opts;
-  const scaleCrop = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
+  const { input, output, assFile, width, height, segments, zooms = [], cropXExpr } = opts;
+  // Crop con offset X personalizado (encuadre inteligente). Si no se especifica, centra.
+  const cropX = cropXExpr ?? '(iw-ow)/2';
+  const scaleCrop = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:${cropX}:(ih-oh)/2`;
   // Escapar la ruta del .ass para el filtro de subtítulos.
   // En Windows hay que convertir los backslashes a forward slashes (ffmpeg los acepta)
   // y escapar los dos puntos de la letra de unidad (C:) para que no se confundan con el separador de opciones.

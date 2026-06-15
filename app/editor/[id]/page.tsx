@@ -38,6 +38,7 @@ export default function Editor() {
   const [enabledZooms, setEnabledZooms] = useState<boolean[]>([]);
   const [platform, setPlatform] = useState<'vertical' | 'horizontal'>('vertical');
   const [color, setColor] = useState('#FFC857');
+  const [framing, setFraming] = useState<'auto' | 'left' | 'center' | 'right'>('auto');
   const [currentTime, setCurrentTime] = useState(0);
   const [previewMode, setPreviewMode] = useState(false);
   const playerRef = useRef<PreviewHandle>(null);
@@ -250,7 +251,7 @@ export default function Editor() {
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="tag">Clips para Shorts / Reels ({p.clips.length})</h2>
             <button className="btn btn-amber !py-1.5 text-sm" disabled={!!busy}
-              onClick={() => call('render', { id, platform: 'vertical', highlightColor: color, renderAllClips: true }, 'Renderizando todos los clips…')}>
+              onClick={() => call('render', { id, platform: 'vertical', highlightColor: color, renderAllClips: true, framing }, 'Renderizando todos los clips…')}>
               ⚡ Renderizar todos
             </button>
           </div>
@@ -266,7 +267,7 @@ export default function Editor() {
                     </button>
                   </div>
                   <button className="btn btn-amber !py-1.5" disabled={!!busy}
-                    onClick={() => call('render', { id, platform: 'vertical', highlightColor: color, clip: c }, `Renderizando "${c.titulo}"…`)}>
+                    onClick={() => call('render', { id, platform: 'vertical', highlightColor: color, clip: c, framing }, `Renderizando "${c.titulo}"…`)}>
                     Renderizar 9:16
                   </button>
                 </div>
@@ -292,8 +293,20 @@ export default function Editor() {
               <input type="color" value={color} onChange={(e) => setColor(e.target.value)}
                 className="w-8 h-8 rounded cursor-pointer bg-transparent" />
             </label>
+            {platform === 'vertical' && (
+              <label className="flex items-center gap-2 text-sm text-mute">
+                Encuadre
+                <select value={framing} onChange={(e) => setFraming(e.target.value as any)}
+                  className="bg-ink border border-line rounded-lg px-2 py-2 text-sm">
+                  <option value="auto">🎯 Auto (detecta la cara)</option>
+                  <option value="center">Centro</option>
+                  <option value="left">Izquierda</option>
+                  <option value="right">Derecha</option>
+                </select>
+              </label>
+            )}
             <button className="btn btn-amber" disabled={!!busy}
-              onClick={() => call('render', { id, platform, highlightColor: color, applyCuts: true, selectedCuts, applyZooms: true, selectedZooms }, 'Renderizando (puede tardar unos minutos)…')}>
+              onClick={() => call('render', { id, platform, highlightColor: color, applyCuts: true, selectedCuts, applyZooms: true, selectedZooms, framing }, 'Renderizando (puede tardar unos minutos)…')}>
               Renderizar {selectedCuts.length > 0 ? `(${selectedCuts.length} cortes` : ''}{selectedZooms.length > 0 ? `${selectedCuts.length > 0 ? ', ' : '('}${selectedZooms.length} zooms` : ''}{(selectedCuts.length > 0 || selectedZooms.length > 0) ? ')' : ''}
             </button>
           </div>

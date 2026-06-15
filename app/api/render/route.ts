@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { nanoid } from 'nanoid';
 import { getProject, saveProject, OUTPUTS_DIR, TMP_DIR } from '@/lib/store';
-import { keepSegments, remapWords, remapInterval, renderVideo } from '@/lib/ffmpeg';
+import { keepSegments, remapWords, remapInterval, renderVideo, getDimensions, detectFocusFraction } from '@/lib/ffmpeg';
 import { buildKaraokeAss } from '@/lib/ass';
 
 export const runtime = 'nodejs';
@@ -25,12 +25,32 @@ export async function POST(req: NextRequest) {
     renderAllClips = false, // si true, renderiza todos los clips detectados
     applyZooms = true, // si true, aplica los zooms detectados por la IA
     selectedZooms, // zooms activados manualmente (sobrescribe los del análisis)
+    framing = 'auto', // 'auto' | 'left' | 'center' | 'right' — encuadre vertical
   } = await req.json();
   const project = getProject(id);
   if (!project?.words?.length) {
     return NextResponse.json({ error: 'Primero transcribí el video' }, { status: 400 });
   }
   const preset = PRESETS[platform as keyof typeof PRESETS] || PRESETS.vertical;
+
+  // Calcula la expresión de offset X del crop según el modo de encuadre.
+  // Solo tiene efecto en vertical (donde se recorta a los lados).
+  // 'auto' detecta dónde está la persona; left/center/right es manual.
+  async function cropExprFor(start: number, end: number): Promise<string | undefined> {
+    if (platform !== 'vertical') return undefined; // horizontal no recorta lateralmente
+    if (framing === 'left') return '0';
+    if (framing === 'center') return '(iw-ow)/2';
+    if (framing === 'right') return '(iw-ow)';
+    // auto: detectar la fracción de foco y convertirla a offset
+    try {
+      const dims = await getDimensions(project!.sourceFile);
+      const frac = await detectFocusFraction(project!.sourceFile, start, end, dims.width, dims.height);
+      // frac 0-1 → offset entre 0 y (iw-ow). Usamos expresión relativa para que funcione post-scale.
+      return `(iw-ow)*${frac.toFixed(3)}`;
+    } catch {
+      return '(iw-ow)/2';
+    }
+  }
 
   try {
     fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
@@ -49,12 +69,14 @@ export async function POST(req: NextRequest) {
         const assPath = path.join(TMP_DIR, `${id}-clip-${renderId}.ass`);
         fs.writeFileSync(assPath, buildKaraokeAss(words, { ...preset, highlightColor }));
         const outFile = path.join(OUTPUTS_DIR, `${id}-clip-${renderId}.mp4`);
+        const cropXExpr = await cropExprFor(cl.start, cl.end);
         await renderVideo({
           input: project.sourceFile,
           output: outFile,
           assFile: assPath,
           ...preset,
           segments,
+          cropXExpr,
         });
         project.renders.unshift({
           id: renderId,
@@ -94,6 +116,10 @@ export async function POST(req: NextRequest) {
     const renderId = nanoid(6);
     const suffix = clip ? `clip-${renderId}` : `${platform}-${renderId}`;
     const outFile = path.join(OUTPUTS_DIR, `${id}-${suffix}.mp4`);
+    // Encuadre inteligente: detectamos el foco en el tramo relevante
+    const focusStart = clip ? clip.start : (segments[0]?.[0] ?? 0);
+    const focusEnd = clip ? clip.end : (segments[0]?.[1] ?? (project.duration || 0));
+    const cropXExpr = await cropExprFor(focusStart, focusEnd);
     await renderVideo({
       input: project.sourceFile,
       output: outFile,
@@ -101,6 +127,7 @@ export async function POST(req: NextRequest) {
       ...preset,
       segments,
       zooms,
+      cropXExpr,
     });
 
     project.renders = project.renders || [];
