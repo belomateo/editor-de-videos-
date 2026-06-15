@@ -92,7 +92,7 @@ export async function analyzeTranscript(
   // Si el video es corto (1 chunk), procesarlo directo
   if (totalChunks === 1) {
     const timed = buildTimedTranscript(words);
-    const user = `Video de ${(duration/60).toFixed(1)} minutos. Transcripción con timestamps:\n${timed}\n\n${brief ? `Instrucciones del usuario:\n${brief}\n\n` : ''}Devolvé este JSON:\n{"cortes":[{"start":12.3,"end":14.1,"razon":"silencio largo"}],"hooks":["gancho 1","gancho 2","gancho 3","gancho 4","gancho 5"],"captions":{"tiktok":"caption con hashtags","instagram":"caption para reel","youtube":"título + descripción","linkedin":"post profesional"},"resumen":"1-2 frases sobre el potencial"}\n\nReglas cortes: silencios >1s, muletillas (eh, este, o sea), arranques en falso, repeticiones. Máximo 40 cortes. No inventes timestamps.`;
+    const user = `Video de ${(duration/60).toFixed(1)} minutos. Transcripción con timestamps:\n${timed}\n\n${brief ? `Instrucciones del usuario:\n${brief}\n\n` : ''}Devolvé este JSON:\n{"cortes":[{"start":12.3,"end":14.1,"razon":"silencio largo"}],"zooms":[{"start":30.0,"end":34.0,"scale":1.3,"razon":"momento de énfasis"}],"hooks":["gancho 1","gancho 2","gancho 3","gancho 4","gancho 5"],"captions":{"tiktok":"caption con hashtags","instagram":"caption para reel","youtube":"título + descripción","linkedin":"post profesional"},"resumen":"1-2 frases sobre el potencial"}\n\nReglas cortes: silencios >1s, muletillas (eh, este, o sea), arranques en falso, repeticiones. Máximo 40 cortes. No inventes timestamps.\n\nReglas zooms: marcá 3-8 momentos donde el speaker dice algo IMPORTANTE (un dato clave, una afirmación fuerte, el remate de una idea, una pregunta retórica). El zoom hace que el video se sienta dinámico. Cada zoom dura 2-5 segundos, scale entre 1.2 y 1.4. No pongas zooms encima de los cortes. Usá timestamps reales.`;
 
     const text = await callClaude(system, user);
     return safeParseJSON(text) as Analysis;
@@ -102,6 +102,7 @@ export async function analyzeTranscript(
   console.log(`Video largo: procesando ${totalChunks} chunks de ${WORDS_PER_CHUNK} palabras`);
 
   const allCortes: Analysis['cortes'] = [];
+  const allZooms: NonNullable<Analysis['zooms']> = [];
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -111,13 +112,16 @@ export async function analyzeTranscript(
 
     console.log(`Procesando chunk ${i + 1}/${totalChunks} (${chunkStart}s - ${chunkEnd}s)`);
 
-    const user = `Parte ${i + 1} de ${totalChunks} del video (${chunkStart}s a ${chunkEnd}s de un video de ${(duration/60).toFixed(1)} minutos total).\n\nTranscripción con timestamps:\n${timed}\n\nIdentificá SOLO los cortes de edición en esta sección. Devolvé este JSON:\n{"cortes":[{"start":12.3,"end":14.1,"razon":"silencio largo"}]}\n\nReglas: silencios >1s, muletillas (eh, este, o sea sueltos), arranques en falso, repeticiones. Máximo 15 cortes por chunk. Usá SOLO timestamps que aparecen en esta transcripción.`;
+    const user = `Parte ${i + 1} de ${totalChunks} del video (${chunkStart}s a ${chunkEnd}s de un video de ${(duration/60).toFixed(1)} minutos total).\n\nTranscripción con timestamps:\n${timed}\n\nIdentificá los cortes de edición Y los momentos de zoom en esta sección. Devolvé este JSON:\n{"cortes":[{"start":12.3,"end":14.1,"razon":"silencio largo"}],"zooms":[{"start":30.0,"end":34.0,"scale":1.3,"razon":"momento de énfasis"}]}\n\nReglas cortes: silencios >1s, muletillas (eh, este, o sea sueltos), arranques en falso, repeticiones. Máximo 15 cortes por chunk.\nReglas zooms: marcá 1-3 momentos por chunk donde el speaker dice algo IMPORTANTE (dato clave, afirmación fuerte, remate). Duración 2-5s, scale entre 1.2 y 1.4. No encima de los cortes.\n\nUsá SOLO timestamps que aparecen en esta transcripción.`;
 
     try {
       const text = await callClaude(system, user);
       const parsed = safeParseJSON(text);
       if (parsed.cortes && Array.isArray(parsed.cortes)) {
         allCortes.push(...parsed.cortes);
+      }
+      if (parsed.zooms && Array.isArray(parsed.zooms)) {
+        allZooms.push(...parsed.zooms);
       }
     } catch (e) {
       console.error(`Error en chunk ${i + 1}:`, e);
@@ -140,6 +144,7 @@ export async function analyzeTranscript(
 
   return {
     cortes: allCortes,
+    zooms: allZooms,
     hooks: summaryParsed.hooks || [],
     captions: summaryParsed.captions || {},
     resumen: summaryParsed.resumen || '',

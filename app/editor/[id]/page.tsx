@@ -5,6 +5,7 @@ import Timeline, { Cut } from '../../components/Timeline';
 import PreviewPlayer, { PreviewHandle } from '../../components/PreviewPlayer';
 
 type Clip = { start: number; end: number; titulo: string; hook: string; razon: string };
+type Zoom = { start: number; end: number; scale: number; razon: string };
 type Project = {
   id: string;
   name: string;
@@ -14,6 +15,7 @@ type Project = {
   transcript?: string;
   analysis?: {
     cortes: Cut[];
+    zooms?: Zoom[];
     hooks: string[];
     captions: Record<string, string>;
     resumen?: string;
@@ -32,6 +34,8 @@ export default function Editor() {
   const [error, setError] = useState('');
   const [cuts, setCuts] = useState<Cut[]>([]);
   const [enabledCuts, setEnabledCuts] = useState<boolean[]>([]);
+  const [zooms, setZooms] = useState<Zoom[]>([]);
+  const [enabledZooms, setEnabledZooms] = useState<boolean[]>([]);
   const [platform, setPlatform] = useState<'vertical' | 'horizontal'>('vertical');
   const [color, setColor] = useState('#FFC857');
   const [currentTime, setCurrentTime] = useState(0);
@@ -44,6 +48,10 @@ export default function Editor() {
     if (data.analysis?.cortes) {
       setCuts(data.analysis.cortes);
       setEnabledCuts(data.analysis.cortes.map(() => true));
+    }
+    if (data.analysis?.zooms) {
+      setZooms(data.analysis.zooms);
+      setEnabledZooms(data.analysis.zooms.map(() => true));
     }
   }
   useEffect(() => { load(); }, [id]);
@@ -64,11 +72,16 @@ export default function Editor() {
       setCuts(data.analysis.cortes);
       setEnabledCuts(data.analysis.cortes.map(() => true));
     }
+    if (data.analysis?.zooms) {
+      setZooms(data.analysis.zooms);
+      setEnabledZooms(data.analysis.zooms.map(() => true));
+    }
   }
 
   if (!p) return <p className="text-mute">Cargando…</p>;
 
   const selectedCuts = cuts.filter((_, i) => enabledCuts[i]);
+  const selectedZooms = zooms.filter((_, i) => enabledZooms[i]);
   const mediaSrc = `/api/media?f=${encodeURIComponent(p.sourceFile)}`;
 
   return (
@@ -124,6 +137,8 @@ export default function Editor() {
             duration={p.duration}
             cuts={cuts}
             enabledCuts={enabledCuts}
+            zooms={zooms}
+            enabledZooms={enabledZooms}
             currentTime={currentTime}
             onSeek={(t) => playerRef.current?.seek(t)}
             onToggleCut={(i) => setEnabledCuts((prev) => prev.map((v, j) => (j === i ? !v : v)))}
@@ -175,6 +190,29 @@ export default function Editor() {
               ))}
             </div>
           </section>
+
+          {/* Panel de zooms */}
+          {zooms.length > 0 && (
+            <section className="card">
+              <h2 className="tag mb-2">🔍 Zooms dinámicos ({selectedZooms.length}/{zooms.length} activos)</h2>
+              <p className="text-xs text-mute mb-2">Acercamientos automáticos en los momentos de énfasis para que el video se sienta más dinámico.</p>
+              <div className="space-y-1 max-h-56 overflow-auto">
+                {zooms.map((z, i) => (
+                  <div key={i} className={`flex items-center gap-3 text-sm py-1.5 px-2 rounded ${enabledZooms[i] ? 'bg-blue-500/5' : 'opacity-50'}`}>
+                    <input type="checkbox" checked={enabledZooms[i] ?? true}
+                      onChange={() => setEnabledZooms((prev) => prev.map((v, j) => (j === i ? !v : v)))}
+                      className="accent-blue-400" />
+                    <button className="font-mono text-xs text-blue-400 w-28 text-left hover:underline"
+                      onClick={() => { setPreviewMode(false); playerRef.current?.previewCut(z.start, z.end); }}>
+                      {fmt(z.start)} → {fmt(z.end)}
+                    </button>
+                    <span className="text-zinc-400 text-xs w-12">{z.scale}x</span>
+                    <span className="flex-1">{z.razon}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="card">
             <h2 className="tag mb-2">Hooks listos para la guerra</h2>
@@ -255,8 +293,8 @@ export default function Editor() {
                 className="w-8 h-8 rounded cursor-pointer bg-transparent" />
             </label>
             <button className="btn btn-amber" disabled={!!busy}
-              onClick={() => call('render', { id, platform, highlightColor: color, applyCuts: true, selectedCuts }, 'Renderizando (puede tardar unos minutos)…')}>
-              Renderizar {selectedCuts.length > 0 ? `(${selectedCuts.length} cortes)` : ''}
+              onClick={() => call('render', { id, platform, highlightColor: color, applyCuts: true, selectedCuts, applyZooms: true, selectedZooms }, 'Renderizando (puede tardar unos minutos)…')}>
+              Renderizar {selectedCuts.length > 0 ? `(${selectedCuts.length} cortes` : ''}{selectedZooms.length > 0 ? `${selectedCuts.length > 0 ? ', ' : '('}${selectedZooms.length} zooms` : ''}{(selectedCuts.length > 0 || selectedZooms.length > 0) ? ')' : ''}
             </button>
           </div>
 

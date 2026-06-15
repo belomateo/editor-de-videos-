@@ -2,11 +2,14 @@
 import { useRef, useState, useEffect } from 'react';
 
 export type Cut = { start: number; end: number; razon: string };
+export type Zoom = { start: number; end: number; scale: number; razon: string };
 
 type Props = {
   duration: number;
   cuts: Cut[];
   enabledCuts: boolean[];
+  zooms?: Zoom[];
+  enabledZooms?: boolean[];
   currentTime: number;
   onSeek: (time: number) => void;
   onToggleCut: (index: number) => void;
@@ -25,6 +28,8 @@ export default function Timeline({
   duration,
   cuts,
   enabledCuts,
+  zooms = [],
+  enabledZooms = [],
   currentTime,
   onSeek,
   onToggleCut,
@@ -131,6 +136,21 @@ export default function Timeline({
                 </span>
               )}
             </div>
+          );
+        })}
+
+        {/* Zooms marcados (banda inferior azul) */}
+        {zooms.map((z, i) => {
+          const left = (z.start / duration) * 100;
+          const width = ((z.end - z.start) / duration) * 100;
+          const enabled = enabledZooms[i] ?? true;
+          return (
+            <div
+              key={`zoom-${i}`}
+              className={`absolute bottom-0 h-2 ${enabled ? 'bg-blue-400/70' : 'bg-zinc-600/40'}`}
+              style={{ left: `${left}%`, width: `${width}%` }}
+              title={`Zoom ${z.scale}x: ${z.razon}`}
+            />
           );
         })}
 

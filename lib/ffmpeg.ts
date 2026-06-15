@@ -58,6 +58,29 @@ export function remapWords(words: Word[], segments: Array<[number, number]>): Wo
   return out;
 }
 
+type Zoom = { start: number; end: number; scale: number };
+
+// Re-mapea un intervalo de tiempo (zoom) a la línea de tiempo post-corte.
+// Devuelve null si el intervalo cae enteramente dentro de un corte.
+export function remapInterval(
+  start: number,
+  end: number,
+  segments: Array<[number, number]>
+): { start: number; end: number } | null {
+  let offset = 0;
+  for (const [s, e] of segments) {
+    // ¿El centro del zoom cae en este segmento conservado?
+    const mid = (start + end) / 2;
+    if (mid >= s && mid < e) {
+      const newStart = Math.max(start, s) - s + offset;
+      const newEnd = Math.min(end, e) - s + offset;
+      return { start: newStart, end: newEnd };
+    }
+    offset += e - s;
+  }
+  return null;
+}
+
 type RenderOpts = {
   input: string;
   output: string;
@@ -65,26 +88,62 @@ type RenderOpts = {
   width: number;
   height: number;
   segments: Array<[number, number]>; // segmentos a conservar
+  zooms?: Zoom[]; // zooms en la línea de tiempo POST-corte
 };
 
+// Genera la expresión de escala dinámica para los zooms.
+// Cada zoom hace un acercamiento suave (ease in/out) en su ventana de tiempo.
+function buildZoomExpr(zooms: Zoom[]): string {
+  if (!zooms.length) return '1';
+  // Construimos una expresión anidada: si t está dentro de un zoom, interpolamos la escala
+  // Usamos una transición de 0.4s para entrar y salir suave
+  const T = 0.4;
+  let expr = '1';
+  for (const z of zooms) {
+    const peak = Math.max(1.05, Math.min(2, z.scale || 1.25));
+    const s = z.start;
+    const e = z.end;
+    // ease-in: de s a s+T sube de 1 a peak
+    // sostenido: de s+T a e-T se mantiene en peak
+    // ease-out: de e-T a e baja de peak a 1
+    const inEnd = s + T;
+    const outStart = Math.max(inEnd, e - T);
+    const easeIn = `(1+(${peak}-1)*(t-${s})/${T})`;
+    const easeOut = `(${peak}-(${peak}-1)*(t-${outStart})/${T})`;
+    const segExpr = `if(between(t,${s},${inEnd}),${easeIn},if(between(t,${inEnd},${outStart}),${peak},if(between(t,${outStart},${e}),${easeOut},1)))`;
+    // Si hay solapamiento tomamos el máximo (el más cercano gana)
+    expr = `max(${expr},${segExpr})`;
+  }
+  return expr;
+}
+
 export async function renderVideo(opts: RenderOpts) {
-  const { input, output, assFile, width, height, segments } = opts;
+  const { input, output, assFile, width, height, segments, zooms = [] } = opts;
   const scaleCrop = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
   const subs = `subtitles=${assFile.replace(/([:'])/g, '\\$1')}`;
 
+  // Filtro de zoom: usamos scale dinámico + crop centrado.
+  // El truco: escalamos el frame por el factor de zoom y recortamos al centro.
+  let zoomFilter = '';
+  if (zooms.length) {
+    const z = buildZoomExpr(zooms);
+    // Escalamos manteniendo centro: sobre-escalamos y recortamos a width x height
+    zoomFilter = `,scale=w='iw*(${z})':h='ih*(${z})':eval=frame,crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
+  }
+
   let args: string[];
-  if (segments.length === 1 && segments[0][0] === 0) {
-    // Sin cortes: filtro simple
+  if (segments.length === 1 && segments[0][0] === 0 && segments[0][1] !== 0) {
+    // Sin cortes: filtro simple (+ zoom si hay)
     args = [
       '-y', '-i', input,
-      '-vf', `${scaleCrop},${subs}`,
+      '-vf', `${scaleCrop}${zoomFilter},${subs}`,
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '21',
       '-c:a', 'aac', '-b:a', '160k',
       '-movflags', '+faststart',
       output,
     ];
   } else {
-    // Con cortes: trim + concat de cada segmento, después subtítulos
+    // Con cortes: trim + concat de cada segmento, después zoom + subtítulos
     const parts: string[] = [];
     const labels: string[] = [];
     segments.forEach(([s, e], i) => {
@@ -93,7 +152,7 @@ export async function renderVideo(opts: RenderOpts) {
       labels.push(`[v${i}][a${i}]`);
     });
     parts.push(`${labels.join('')}concat=n=${segments.length}:v=1:a=1[vc][ac]`);
-    parts.push(`[vc]${scaleCrop},${subs}[vout]`);
+    parts.push(`[vc]${scaleCrop}${zoomFilter},${subs}[vout]`);
     args = [
       '-y', '-i', input,
       '-filter_complex', parts.join(';'),

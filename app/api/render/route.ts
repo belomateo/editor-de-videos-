@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { nanoid } from 'nanoid';
 import { getProject, saveProject, OUTPUTS_DIR, TMP_DIR } from '@/lib/store';
-import { keepSegments, remapWords, renderVideo } from '@/lib/ffmpeg';
+import { keepSegments, remapWords, remapInterval, renderVideo } from '@/lib/ffmpeg';
 import { buildKaraokeAss } from '@/lib/ass';
 
 export const runtime = 'nodejs';
@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
     selectedCuts,
     clip, // { start, end, titulo } — si viene, renderiza solo ese tramo (modo Clips)
     renderAllClips = false, // si true, renderiza todos los clips detectados
+    applyZooms = true, // si true, aplica los zooms detectados por la IA
+    selectedZooms, // zooms activados manualmente (sobrescribe los del análisis)
   } = await req.json();
   const project = getProject(id);
   if (!project?.words?.length) {
@@ -76,6 +78,16 @@ export async function POST(req: NextRequest) {
     }
     const words = remapWords(project.words, segments);
 
+    // Remapear los zooms a la línea de tiempo post-corte
+    let zooms: Array<{ start: number; end: number; scale: number }> = [];
+    if (applyZooms) {
+      const rawZooms = selectedZooms ?? project.analysis?.zooms ?? [];
+      for (const z of rawZooms) {
+        const remapped = remapInterval(z.start, z.end, segments);
+        if (remapped) zooms.push({ start: remapped.start, end: remapped.end, scale: z.scale });
+      }
+    }
+
     const assPath = path.join(TMP_DIR, `${id}-${platform}.ass`);
     fs.writeFileSync(assPath, buildKaraokeAss(words, { ...preset, highlightColor }));
 
@@ -88,6 +100,7 @@ export async function POST(req: NextRequest) {
       assFile: assPath,
       ...preset,
       segments,
+      zooms,
     });
 
     project.renders = project.renders || [];

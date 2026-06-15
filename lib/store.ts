@@ -9,8 +9,10 @@ const DB_FILE = path.join(DATA_DIR, 'projects.json');
 
 export type Word = { word: string; start: number; end: number };
 export type Cut = { start: number; end: number; razon: string };
+export type Zoom = { start: number; end: number; scale: number; razon: string };
 export type Analysis = {
   cortes: Cut[];
+  zooms?: Zoom[];
   hooks: string[];
   captions: Record<string, string>;
   resumen?: string;
