@@ -7,13 +7,13 @@ export const maxDuration = 180;
 
 export async function POST(req: NextRequest) {
   const { id, brief } = await req.json();
-  const project = getProject(id);
+  const project = await getProject(id);
   if (!project?.words?.length) {
     return NextResponse.json({ error: 'Primero transcribí el video' }, { status: 400 });
   }
   try {
     project.clips = await findClips(project.words, project.duration || 0, brief || '');
-    saveProject(project);
+    await saveProject(project);
     return NextResponse.json(project);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

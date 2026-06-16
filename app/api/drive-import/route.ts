@@ -100,6 +100,6 @@ export async function POST(req: NextRequest) {
     renders: [],
     createdAt: new Date().toISOString(),
   };
-  saveProject(project);
+  await saveProject(project);
   return NextResponse.json(project);
 }

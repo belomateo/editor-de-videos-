@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const { id } = await req.json();
-  const project = getProject(id);
+  const project = await getProject(id);
   if (!project) return NextResponse.json({ error: 'Proyecto no existe' }, { status: 404 });
 
   try {
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     }));
     project.transcript = data.text || '';
     project.status = 'transcripto';
-    saveProject(project);
+    await saveProject(project);
     fs.unlinkSync(audioPath);
 
     return NextResponse.json(project);

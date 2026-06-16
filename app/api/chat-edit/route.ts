@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const { id, instruccion, estado, historial } = await req.json();
-  const project = getProject(id);
+  const project = await getProject(id);
   if (!project?.words?.length) {
     return NextResponse.json({ error: 'Primero transcribí y analizá el video' }, { status: 400 });
   }

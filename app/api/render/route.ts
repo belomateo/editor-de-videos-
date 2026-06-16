@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     selectedZooms, // zooms activados manualmente (sobrescribe los del análisis)
     framing = 'auto', // 'auto' | 'left' | 'center' | 'right' — encuadre vertical
   } = await req.json();
-  const project = getProject(id);
+  const project = await getProject(id);
   if (!project?.words?.length) {
     return NextResponse.json({ error: 'Primero transcribí el video' }, { status: 400 });
   }
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
         });
       }
       project.status = 'renderizado';
-      saveProject(project);
+      await saveProject(project);
       return NextResponse.json(project);
     }
 
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
     });
     project.status = 'renderizado';
-    saveProject(project);
+    await saveProject(project);
     return NextResponse.json(project);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

@@ -1,12 +1,13 @@
-import fs from 'fs';
 import path from 'path';
+import { createClient } from './supabase/server';
 
+// ── Rutas locales (los videos pesados siguen en disco, no en la nube) ──
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const OUTPUTS_DIR = path.join(DATA_DIR, 'outputs');
 export const TMP_DIR = path.join(DATA_DIR, 'tmp');
-const DB_FILE = path.join(DATA_DIR, 'projects.json');
 
+// ── Tipos (idénticos a antes) ──
 export type Word = { word: string; start: number; end: number };
 export type Cut = { start: number; end: number; razon: string };
 export type Zoom = { start: number; end: number; scale: number; razon: string };
@@ -46,25 +47,52 @@ export type Project = {
   createdAt: string;
 };
 
-function ensureDirs() {
-  for (const d of [DATA_DIR, UPLOADS_DIR, OUTPUTS_DIR, TMP_DIR]) {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+// ── Acceso a datos vía Supabase ──
+// El proyecto completo se guarda como JSON en la columna `data` de la tabla `projects`.
+
+export async function listProjects(): Promise<Project[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('projects')
+    .select('data')
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('Error listando proyectos:', error.message);
+    return [];
   }
+  return (data || []).map((row: any) => row.data as Project);
 }
 
-export function listProjects(): Project[] {
-  ensureDirs();
-  if (!fs.existsSync(DB_FILE)) return [];
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+export async function getProject(id: string): Promise<Project | undefined> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('projects')
+    .select('data')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    console.error('Error obteniendo proyecto:', error.message);
+    return undefined;
+  }
+  return data ? (data.data as Project) : undefined;
 }
 
-export function getProject(id: string): Project | undefined {
-  return listProjects().find((p) => p.id === id);
-}
+export async function saveProject(project: Project): Promise<void> {
+  const supabase = createClient();
+  // owner_id se setea desde la sesión activa (si la hay)
+  const { data: userData } = await supabase.auth.getUser();
+  const ownerId = userData?.user?.id ?? null;
 
-export function saveProject(project: Project) {
-  ensureDirs();
-  const all = listProjects().filter((p) => p.id !== project.id);
-  all.unshift(project);
-  fs.writeFileSync(DB_FILE, JSON.stringify(all, null, 2));
+  const row: any = {
+    id: project.id,
+    data: project,
+    updated_at: new Date().toISOString(),
+  };
+  if (ownerId) row.owner_id = ownerId;
+
+  const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
+  if (error) {
+    console.error('Error guardando proyecto:', error.message);
+    throw new Error('No se pudo guardar el proyecto: ' + error.message);
+  }
 }

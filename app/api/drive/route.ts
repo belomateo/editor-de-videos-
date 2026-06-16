@@ -7,7 +7,7 @@ export const maxDuration = 600;
 
 export async function POST(req: NextRequest) {
   const { id, renderId } = await req.json();
-  const project = getProject(id);
+  const project = await getProject(id);
   const render = project?.renders?.find((r) => r.id === renderId);
   if (!project || !render) {
     return NextResponse.json({ error: 'Render no encontrado' }, { status: 404 });
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const name = `${base} — ${render.label || render.platform} — ${render.id}.mp4`;
     const { link } = await uploadToDrive(render.file, name);
     render.driveLink = link;
-    saveProject(project);
+    await saveProject(project);
     return NextResponse.json(project);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

@@ -7,7 +7,7 @@ import { listProjects, saveProject, UPLOADS_DIR, Project } from '@/lib/store';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  return NextResponse.json(listProjects());
+  return NextResponse.json(await listProjects());
 }
 
 export async function POST(req: NextRequest) {
@@ -29,6 +29,6 @@ export async function POST(req: NextRequest) {
     renders: [],
     createdAt: new Date().toISOString(),
   };
-  saveProject(project);
+  await saveProject(project);
   return NextResponse.json(project);
 }
