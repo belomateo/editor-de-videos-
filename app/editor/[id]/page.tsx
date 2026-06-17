@@ -126,6 +126,37 @@ export default function Editor() {
     }
   }
 
+  // Descarga un ZIP con el video + captions, listo para subir a las redes
+  async function exportForPublish(renderId: string) {
+    setBusy('Armando el paquete para publicar…');
+    setError('');
+    try {
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, renderId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Error al exportar' }));
+        setError(data.error || 'Error al exportar');
+        setBusy('');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${p?.name?.replace(/\.[^.]+$/, '') || 'clip'}-publicar.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setBusy('');
+  }
+
   if (!p) return <p className="text-mute">Cargando…</p>;
 
   const selectedCuts = cuts.filter((_, i) => enabledCuts[i]);
@@ -383,6 +414,11 @@ export default function Editor() {
                         <button className="text-amber hover:underline" disabled={!!busy}
                           onClick={() => call('drive', { id, renderId: r.id }, 'Subiendo a Google Drive…')}>↑ Subir a Drive</button>
                       )}
+                      <button className="text-amber hover:underline" disabled={!!busy}
+                        onClick={() => exportForPublish(r.id)}
+                        title="Descarga el video + un archivo con los captions y hashtags, listo para subir">
+                        📦 Listo para publicar
+                      </button>
                       <a className="text-amber hover:underline" href={`/api/media?f=${encodeURIComponent(r.file)}`} download>Descargar</a>
                     </span>
                   </div>
