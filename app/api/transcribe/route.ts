@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getProject, saveProject, TMP_DIR } from '@/lib/store';
 import { extractAudio, getDuration } from '@/lib/ffmpeg';
+import { correctWords, correctTranscript } from '@/lib/glossary';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -40,12 +41,14 @@ export async function POST(req: NextRequest) {
     if (!res.ok) throw new Error(`Whisper: ${res.status} ${await res.text()}`);
     const data = await res.json();
 
-    project.words = (data.words || []).map((w: any) => ({
+    const rawWords = (data.words || []).map((w: any) => ({
       word: w.word,
       start: w.start,
       end: w.end,
     }));
-    project.transcript = data.text || '';
+    // Corrección automática con glosario (Cloud Code → Claude Code, etc.)
+    project.words = correctWords(rawWords);
+    project.transcript = correctTranscript(data.text || '');
     project.status = 'transcripto';
     await saveProject(project);
     fs.unlinkSync(audioPath);
